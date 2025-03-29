@@ -1,8 +1,8 @@
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
-const socketio = require("socket.io");
-const http = require("http");
+const { createServer } = require("http");
+const { Server } = require("socket.io");
 const helmet = require("helmet");
 const mongoSanitize = require("express-mongo-sanitize");
 const xss = require("xss-clean");
@@ -12,7 +12,7 @@ const cors = require("cors");
 
 // Initialize Express app
 const app = express();
-const server = http.createServer(app);
+const server = createServer(app);
 
 // Apply security middleware
 app.use(helmet());
@@ -131,7 +131,7 @@ async function initializeSampleBuses() {
 }
 
 // Configure Socket.IO with proper CORS
-const io = socketio(server, {
+const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     methods: ["GET", "POST"],
@@ -139,8 +139,7 @@ const io = socketio(server, {
   },
   transports: ["websocket", "polling"],
   pingTimeout: 60000,
-  pingInterval: 25000,
-  cookie: false
+  pingInterval: 25000
 });
 
 // JWT Configuration
@@ -565,12 +564,19 @@ app.all("*", (req, res, next) => {
   });
 });
 
-// Start Server
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || "0.0.0.0";
-server.listen(PORT, HOST, () => {
-  console.log(`Server running on http://${HOST}:${PORT}`);
-});
+// Vercel serverless function handler
+module.exports = app;
+
+// For Vercel deployment
+if (process.env.VERCEL) {
+  module.exports = server;
+} else {
+  const PORT = process.env.PORT || 3000;
+  const HOST = process.env.HOST || "0.0.0.0";
+  server.listen(PORT, HOST, () => {
+    console.log(`Server running on http://${HOST}:${PORT}`);
+  });
+}
 
 // Error handling
 process.on("unhandledRejection", (err) => {
