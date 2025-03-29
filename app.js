@@ -8,6 +8,7 @@ const mongoSanitize = require("express-mongo-sanitize");
 const xss = require("xss-clean");
 const hpp = require("hpp");
 const jwt = require("jsonwebtoken");
+const cors = require("cors");
 
 // Initialize Express app
 const app = express();
@@ -19,6 +20,29 @@ app.use(express.json({ limit: "10kb" }));
 app.use(mongoSanitize());
 app.use(xss());
 app.use(hpp());
+
+// CORS Configuration
+const allowedOrigins = [
+  "https://icb-tracking-system.netlify.app",
+  "http://localhost:3000"
+];
+
+// Configure CORS middleware
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-access-token']
+}));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // MongoDB Connection
 const MONGO_URI =
@@ -38,7 +62,7 @@ mongoose
   })
   .then(() => {
     console.log("MongoDB Connected Successfully");
-    // Initialize sample buses data - You can add your bus details here
+    // Initialize sample buses data
     initializeSampleBuses();
   })
   .catch((err) => {
@@ -106,14 +130,17 @@ async function initializeSampleBuses() {
   }
 }
 
-// Configure Socket.IO with manual CORS
+// Configure Socket.IO with proper CORS
 const io = socketio(server, {
   cors: {
-    origin: "*",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
+    credentials: true
   },
+  transports: ["websocket", "polling"],
   pingTimeout: 60000,
   pingInterval: 25000,
+  cookie: false
 });
 
 // JWT Configuration
@@ -126,29 +153,6 @@ const signToken = (userId) => {
     expiresIn: JWT_EXPIRES_IN,
   });
 };
-
-// Manually handle CORS headers for all requests
-app.use((req, res, next) => {
-  const allowedOrigins = [
-    "https://icb-tracking-system.netlify.app",
-    "http://localhost:3000",
-  ];
-
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-access-token");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-
-  // Handle preflight requests
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  next();
-});
 
 // Global error handler middleware
 app.use((err, req, res, next) => {
@@ -220,10 +224,12 @@ const getClientIp = (req) => {
 // Socket.IO Connection Handling
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
+  
   socket.on("joinBus", (busNumber) => {
     socket.join(busNumber);
     console.log(`Socket ${socket.id} joined bus ${busNumber}`);
   });
+  
   socket.on("locationUpdate", async (data) => {
     try {
       const { busNumber, latitude, longitude, speed, direction } = data;
@@ -254,6 +260,7 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Failed to update location" });
     }
   });
+  
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
   });
