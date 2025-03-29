@@ -27,7 +27,7 @@ const allowedOrigins = [
   "http://localhost:3000"
 ];
 
-// Configure CORS middleware
+// Enhanced CORS middleware configuration
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -38,11 +38,24 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-access-token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-access-token'],
+  exposedHeaders: ['Content-Length', 'X-Request-ID']
 }));
 
 // Handle preflight requests
-app.options('*', cors());
+app.options('*', cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-access-token'],
+  exposedHeaders: ['Content-Length', 'X-Request-ID']
+}));
 
 // MongoDB Connection
 const MONGO_URI =
@@ -135,11 +148,14 @@ const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-access-token']
   },
   transports: ["websocket", "polling"],
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
+  cookie: false,
+  allowEIO3: true
 });
 
 // JWT Configuration
@@ -220,9 +236,23 @@ const getClientIp = (req) => {
   );
 };
 
-// Socket.IO Connection Handling
+// Enhanced Socket.IO Connection Handling
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
+  
+  // Authentication middleware for socket connections
+  socket.use((packet, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+      return next(new Error("Authentication error"));
+    }
+    try {
+      jwt.verify(token, JWT_SECRET);
+      next();
+    } catch (err) {
+      next(new Error("Authentication error"));
+    }
+  });
   
   socket.on("joinBus", (busNumber) => {
     socket.join(busNumber);
@@ -262,6 +292,14 @@ io.on("connection", (socket) => {
   
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
+  });
+  
+  socket.on("error", (err) => {
+    console.error("Socket error:", err);
+    if (err.message === "Authentication error") {
+      socket.emit("unauthorized", { message: "Invalid or expired token" });
+      socket.disconnect();
+    }
   });
 });
 
