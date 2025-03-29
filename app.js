@@ -1,7 +1,7 @@
-
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
+const cors = require("cors");
 const socketio = require("socket.io");
 const http = require("http");
 const helmet = require("helmet");
@@ -14,65 +14,99 @@ const jwt = require("jsonwebtoken");
 const app = express();
 const server = http.createServer(app);
 
+// Configure CORS
+const allowedOrigins = [
+  "https://icb-tracking-system.netlify.app",
+  "http://localhost:3000", // Add other origins as needed
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-access-token"],
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
 // Apply security middleware
 app.use(helmet());
-app.use(express.json({ limit: '10kb' }));
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // Handle preflight requests
+app.use(express.json({ limit: "10kb" }));
 app.use(mongoSanitize());
 app.use(xss());
 app.use(hpp());
 
 // MongoDB Connection
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://rajesh:rajesh@cluster0.cqkgbx3.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const MONGO_URI =
+  process.env.MONGO_URI ||
+  "mongodb+srv://rajesh:rajesh@cluster0.cqkgbx3.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
 
-mongoose.connect(MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 30000,
-  socketTimeoutMS: 45000,
-  connectTimeoutMS: 30000,
-  retryWrites: true,
-  retryReads: true,
-  maxPoolSize: 10,
-  family: 4
-})
-.then(() => console.log("MongoDB Connected Successfully"))
-.catch((err) => {
-  console.error("MongoDB Connection Error:", err);
-  process.exit(1);
-});
+mongoose
+  .connect(MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 30000,
+    socketTimeoutMS: 45000,
+    connectTimeoutMS: 30000,
+    retryWrites: true,
+    retryReads: true,
+    maxPoolSize: 10,
+    family: 4,
+  })
+  .then(() => console.log("MongoDB Connected Successfully"))
+  .catch((err) => {
+    console.error("MongoDB Connection Error:", err);
+    process.exit(1);
+  });
 
-// Configure Socket.IO
+// Configure Socket.IO with CORS
 const io = socketio(server, {
   cors: {
-    origin: "*",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
-    transports: ['websocket', 'polling'],
-    allowEIO3: true
+    transports: ["websocket", "polling"],
+    allowEIO3: true,
   },
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
 });
 
-// JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1d';
+// JWT Configuration
+const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-here";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1d";
 
 // Generate JWT Token
 const signToken = (userId) => {
   return jwt.sign({ id: userId }, JWT_SECRET, {
-    expiresIn: JWT_EXPIRES_IN
+    expiresIn: JWT_EXPIRES_IN,
   });
 };
 
 // Global error handler middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
+
+  // Handle CORS errors
+  if (err.message === "Not allowed by CORS") {
+    return res.status(403).json({
+      status: "error",
+      message: "Origin not allowed",
+    });
+  }
+
   res.status(500).json({
-    status: 'error',
-    message: 'Something went wrong!',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    status: "error",
+    message: "Something went wrong!",
+    error: process.env.NODE_ENV === "development" ? err.message : undefined,
   });
 });
 
@@ -85,17 +119,21 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   ipAddress: { type: String },
   lastLogin: { type: Date },
-  role: { type: String, enum: ['user', 'driver', 'admin'], default: 'user' }
+  role: { type: String, enum: ["user", "driver", "admin"], default: "user" },
 });
 
 const busSchema = new mongoose.Schema({
   busNumber: { type: String, required: true, unique: true },
   route: { type: String, required: true },
   driverId: { type: String, required: true },
-  currentStatus: { type: String, enum: ['active', 'inactive', 'maintenance'], default: 'active' },
+  currentStatus: {
+    type: String,
+    enum: ["active", "inactive", "maintenance"],
+    default: "active",
+  },
   capacity: { type: Number, default: 40 },
   contactNumber: { type: String },
-  lastUpdated: { type: Date }
+  lastUpdated: { type: Date },
 });
 
 const trackerSchema = new mongoose.Schema({
@@ -105,7 +143,7 @@ const trackerSchema = new mongoose.Schema({
   longitude: { type: Number, required: true },
   speed: { type: Number },
   direction: { type: Number },
-  timestamp: { type: Date, default: Date.now }
+  timestamp: { type: Date, default: Date.now },
 });
 
 // Models
@@ -115,32 +153,34 @@ const Tracker = mongoose.model("Tracker", trackerSchema);
 
 // Utility functions
 const getClientIp = (req) => {
-  return req.headers['x-forwarded-for'] || 
-         req.connection.remoteAddress || 
-         req.socket.remoteAddress ||
-         (req.connection.socket ? req.connection.socket.remoteAddress : null);
+  return (
+    req.headers["x-forwarded-for"] ||
+    req.connection.remoteAddress ||
+    req.socket.remoteAddress ||
+    (req.connection.socket ? req.connection.socket.remoteAddress : null)
+  );
 };
 
 // Socket.IO Connection Handling
-io.on('connection', (socket) => {
-  console.log('New client connected:', socket.id);
+io.on("connection", (socket) => {
+  console.log("New client connected:", socket.id);
 
-  socket.on('joinBus', (busNumber) => {
+  socket.on("joinBus", (busNumber) => {
     socket.join(busNumber);
     console.log(`Socket ${socket.id} joined bus ${busNumber}`);
   });
 
-  socket.on('locationUpdate', async (data) => {
+  socket.on("locationUpdate", async (data) => {
     try {
       const { busNumber, latitude, longitude, speed, direction } = data;
-      
+
       const tracker = new Tracker({
         deviceId: socket.id,
         busNumber,
         latitude,
         longitude,
         speed,
-        direction
+        direction,
       });
       await tracker.save();
 
@@ -150,42 +190,43 @@ io.on('connection', (socket) => {
         { upsert: true }
       );
 
-      io.to(busNumber).emit('busLocation', {
+      io.to(busNumber).emit("busLocation", {
         busNumber,
         latitude,
         longitude,
         speed,
         direction,
-        timestamp: new Date()
+        timestamp: new Date(),
       });
     } catch (error) {
-      console.error('Error handling location update:', error);
-      socket.emit('error', { message: 'Failed to update location' });
+      console.error("Error handling location update:", error);
+      socket.emit("error", { message: "Failed to update location" });
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id);
   });
 });
 
 // API Routes
 app.post("/api/register", async (req, res, next) => {
   try {
-    const { userId, name, contact, email, password, confirmPassword, role } = req.body;
-    
+    const { userId, name, contact, email, password, confirmPassword, role } =
+      req.body;
+
     if (password !== confirmPassword) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'Passwords do not match'
+        status: "fail",
+        message: "Passwords do not match",
       });
     }
 
     const existingUser = await User.findOne({ $or: [{ userId }, { email }] });
     if (existingUser) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'User ID or Email already exists'
+        status: "fail",
+        message: "User ID or Email already exists",
       });
     }
 
@@ -199,23 +240,22 @@ app.post("/api/register", async (req, res, next) => {
       password,
       ipAddress,
       lastLogin: new Date(),
-      role: role || 'user'
+      role: role || "user",
     });
 
-    // Generate JWT token for the new user
     const token = signToken(newUser.userId);
 
     res.status(201).json({
-      status: 'success',
+      status: "success",
       token,
       data: {
         user: {
           userId: newUser.userId,
           name: newUser.name,
           email: newUser.email,
-          role: newUser.role
-        }
-      }
+          role: newUser.role,
+        },
+      },
     });
   } catch (err) {
     next(err);
@@ -228,8 +268,8 @@ app.post("/api/login", async (req, res, next) => {
 
     if (!userId || !password) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'Please provide user ID and password!'
+        status: "fail",
+        message: "Please provide user ID and password!",
       });
     }
 
@@ -238,8 +278,8 @@ app.post("/api/login", async (req, res, next) => {
 
     if (!user || password !== user.password) {
       return res.status(401).json({
-        status: 'fail',
-        message: 'Incorrect user ID or password'
+        status: "fail",
+        message: "Incorrect user ID or password",
       });
     }
 
@@ -247,11 +287,10 @@ app.post("/api/login", async (req, res, next) => {
     user.lastLogin = new Date();
     await user.save();
 
-    // Generate JWT token
     const token = signToken(user.userId);
 
     res.status(200).json({
-      status: 'success',
+      status: "success",
       token,
       data: {
         user: {
@@ -260,9 +299,9 @@ app.post("/api/login", async (req, res, next) => {
           email: user.email,
           role: user.role,
           ipAddress: user.ipAddress,
-          lastLogin: user.lastLogin
-        }
-      }
+          lastLogin: user.lastLogin,
+        },
+      },
     });
   } catch (err) {
     next(err);
@@ -272,35 +311,31 @@ app.post("/api/login", async (req, res, next) => {
 // Protected routes middleware
 const protect = async (req, res, next) => {
   try {
-    // 1) Getting token and check if it's there
     let token;
     if (
       req.headers.authorization &&
-      req.headers.authorization.startsWith('Bearer')
+      req.headers.authorization.startsWith("Bearer")
     ) {
-      token = req.headers.authorization.split(' ')[1];
+      token = req.headers.authorization.split(" ")[1];
     }
 
     if (!token) {
       return res.status(401).json({
-        status: 'fail',
-        message: 'You are not logged in! Please log in to get access.'
+        status: "fail",
+        message: "You are not logged in! Please log in to get access.",
       });
     }
 
-    // 2) Verification token
     const decoded = jwt.verify(token, JWT_SECRET);
-
-    // 3) Check if user still exists
     const currentUser = await User.findOne({ userId: decoded.id });
+
     if (!currentUser) {
       return res.status(401).json({
-        status: 'fail',
-        message: 'The user belonging to this token does no longer exist.'
+        status: "fail",
+        message: "The user belonging to this token does no longer exist.",
       });
     }
 
-    // GRANT ACCESS TO PROTECTED ROUTE
     req.user = currentUser;
     next();
   } catch (err) {
@@ -308,14 +343,14 @@ const protect = async (req, res, next) => {
   }
 };
 
-// Example of a protected route
+// Protected route example
 app.get("/api/me", protect, async (req, res, next) => {
   try {
     res.status(200).json({
-      status: 'success',
+      status: "success",
       data: {
-        user: req.user
-      }
+        user: req.user,
+      },
     });
   } catch (err) {
     next(err);
@@ -326,36 +361,20 @@ app.get("/api/me", protect, async (req, res, next) => {
 app.post("/api/buses", protect, async (req, res, next) => {
   try {
     const { busNumber, route, driverId, capacity, contactNumber } = req.body;
-    
+
     const bus = await Bus.create({
       busNumber,
       route,
       driverId,
       capacity,
-      contactNumber
+      contactNumber,
     });
 
     res.status(201).json({
-      status: 'success',
+      status: "success",
       data: {
-        bus
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-app.get("/api/buses", protect, async (req, res, next) => {
-  try {
-    const buses = await Bus.find().populate('driverId', 'name contact');
-    
-    res.status(200).json({
-      status: 'success',
-      results: buses.length,
-      data: {
-        buses
-      }
+        bus,
+      },
     });
   } catch (err) {
     next(err);
@@ -364,21 +383,23 @@ app.get("/api/buses", protect, async (req, res, next) => {
 
 app.get("/api/buses/:busNumber", protect, async (req, res, next) => {
   try {
-    const bus = await Bus.findOne({ busNumber: req.params.busNumber })
-      .populate('driverId', 'name contact');
-    
+    const bus = await Bus.findOne({ busNumber: req.params.busNumber }).populate(
+      "driverId",
+      "name contact"
+    );
+
     if (!bus) {
       return res.status(404).json({
-        status: 'fail',
-        message: 'No bus found with that ID'
+        status: "fail",
+        message: "No bus found with that ID",
       });
     }
 
     res.status(200).json({
-      status: 'success',
+      status: "success",
       data: {
-        bus
-      }
+        bus,
+      },
     });
   } catch (err) {
     next(err);
@@ -389,28 +410,28 @@ app.get("/api/buses/:busNumber", protect, async (req, res, next) => {
 app.post("/api/trackers", protect, async (req, res, next) => {
   try {
     const { busNumber, latitude, longitude, speed, direction } = req.body;
-    
+
     if (!busNumber || !latitude || !longitude) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'Please provide busNumber, latitude, and longitude'
+        status: "fail",
+        message: "Please provide busNumber, latitude, and longitude",
       });
     }
 
     if (isNaN(latitude) || isNaN(longitude)) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'Latitude and longitude must be valid numbers'
+        status: "fail",
+        message: "Latitude and longitude must be valid numbers",
       });
     }
 
     const tracker = await Tracker.create({
-      deviceId: req.headers['device-id'] || 'web',
+      deviceId: req.headers["device-id"] || "web",
       busNumber,
       latitude: parseFloat(latitude),
       longitude: parseFloat(longitude),
       speed: speed ? parseFloat(speed) : null,
-      direction: direction ? parseFloat(direction) : null
+      direction: direction ? parseFloat(direction) : null,
     });
 
     await Bus.findOneAndUpdate(
@@ -419,17 +440,17 @@ app.post("/api/trackers", protect, async (req, res, next) => {
       { upsert: true, new: true }
     );
 
-    io.to(busNumber).emit('busLocation', {
+    io.to(busNumber).emit("busLocation", {
       busNumber,
       latitude: tracker.latitude,
       longitude: tracker.longitude,
       speed: tracker.speed,
       direction: tracker.direction,
-      timestamp: tracker.timestamp
+      timestamp: tracker.timestamp,
     });
 
     res.status(201).json({
-      status: 'success',
+      status: "success",
       data: {
         tracker: {
           busNumber: tracker.busNumber,
@@ -437,9 +458,9 @@ app.post("/api/trackers", protect, async (req, res, next) => {
           longitude: tracker.longitude,
           speed: tracker.speed,
           direction: tracker.direction,
-          timestamp: tracker.timestamp
-        }
-      }
+          timestamp: tracker.timestamp,
+        },
+      },
     });
   } catch (err) {
     next(err);
@@ -455,16 +476,16 @@ app.get("/api/trackers/:busNumber", protect, async (req, res, next) => {
 
     if (trackers.length === 0) {
       return res.status(404).json({
-        status: 'fail',
-        message: 'No tracking data found for this bus'
+        status: "fail",
+        message: "No tracking data found for this bus",
       });
     }
 
     res.status(200).json({
-      status: 'success',
+      status: "success",
       data: {
-        trackers
-      }
+        trackers,
+      },
     });
   } catch (err) {
     next(err);
@@ -479,18 +500,18 @@ app.get("/api/trackers/history/:busNumber", protect, async (req, res, next) => {
     if (startDate && endDate) {
       query.timestamp = {
         $gte: new Date(startDate),
-        $lte: new Date(endDate)
+        $lte: new Date(endDate),
       };
     }
 
     const trackers = await Tracker.find(query).sort({ timestamp: 1 });
-    
+
     res.status(200).json({
-      status: 'success',
+      status: "success",
       results: trackers.length,
       data: {
-        trackers
-      }
+        trackers,
+      },
     });
   } catch (err) {
     next(err);
@@ -498,33 +519,32 @@ app.get("/api/trackers/history/:busNumber", protect, async (req, res, next) => {
 });
 
 // 404 Handler
-app.all('*', (req, res, next) => {
+app.all("*", (req, res, next) => {
   res.status(404).json({
-    status: 'fail',
-    message: `Can't find ${req.originalUrl} on this server!`
+    status: "fail",
+    message: `Can't find ${req.originalUrl} on this server!`,
   });
 });
 
 // Start Server
 const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || "0.0.0.0";
 
 server.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
 });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('UNHANDLED REJECTION! 💥 Shutting down...');
+// Error handling
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION! 💥 Shutting down...");
   console.error(err.name, err.message);
   server.close(() => {
     process.exit(1);
   });
 });
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION! 💥 Shutting down...");
   console.error(err.name, err.message);
   process.exit(1);
 });
