@@ -36,11 +36,75 @@ mongoose
     maxPoolSize: 10,
     family: 4,
   })
-  .then(() => console.log("MongoDB Connected Successfully"))
+  .then(() => {
+    console.log("MongoDB Connected Successfully");
+    // Initialize sample buses data - You can add your bus details here
+    initializeSampleBuses();
+  })
   .catch((err) => {
     console.error("MongoDB Connection Error:", err);
     process.exit(1);
   });
+
+// Function to initialize sample buses
+async function initializeSampleBuses() {
+  try {
+    const sampleBuses = [
+      {
+        busNumber: "BUS001",
+        route: "College to Kompally",
+        driverId: "DRIVER001",
+        capacity: 40,
+        contactNumber: "9876543210",
+        currentStatus: "active"
+      },
+      {
+        busNumber: "BUS002",
+        route: "College to Secunderabad",
+        driverId: "DRIVER002",
+        capacity: 40,
+        contactNumber: "9876543211",
+        currentStatus: "active"
+      },
+      {
+        busNumber: "BUS003",
+        route: "College to Gachibowli",
+        driverId: "DRIVER003",
+        capacity: 40,
+        contactNumber: "9876543212",
+        currentStatus: "active"
+      },
+      {
+        busNumber: "BUS004",
+        route: "College to LB Nagar",
+        driverId: "DRIVER004",
+        capacity: 40,
+        contactNumber: "9876543213",
+        currentStatus: "active"
+      },
+      {
+        busNumber: "BUS005",
+        route: "College to Uppal",
+        driverId: "DRIVER005",
+        capacity: 40,
+        contactNumber: "9876543214",
+        currentStatus: "active"
+      }
+    ];
+
+    // Insert buses if they don't exist
+    for (const bus of sampleBuses) {
+      await Bus.findOneAndUpdate(
+        { busNumber: bus.busNumber },
+        bus,
+        { upsert: true, new: true }
+      );
+    }
+    console.log("Sample buses initialized successfully");
+  } catch (error) {
+    console.error("Error initializing sample buses:", error);
+  }
+}
 
 // Configure Socket.IO with manual CORS
 const io = socketio(server, {
@@ -103,7 +167,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Schemas and Models (unchanged)
+// Schemas and Models
 const userSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   name: { type: String, required: true },
@@ -114,6 +178,7 @@ const userSchema = new mongoose.Schema({
   lastLogin: { type: Date },
   role: { type: String, enum: ["user", "driver", "admin"], default: "user" },
 });
+
 const busSchema = new mongoose.Schema({
   busNumber: { type: String, required: true, unique: true },
   route: { type: String, required: true },
@@ -127,6 +192,7 @@ const busSchema = new mongoose.Schema({
   contactNumber: { type: String },
   lastUpdated: { type: Date },
 });
+
 const trackerSchema = new mongoose.Schema({
   deviceId: { type: String, required: true },
   busNumber: { type: String, required: true },
@@ -136,11 +202,12 @@ const trackerSchema = new mongoose.Schema({
   direction: { type: Number },
   timestamp: { type: Date, default: Date.now },
 });
+
 const User = mongoose.model("User", userSchema);
 const Bus = mongoose.model("Bus", busSchema);
 const Tracker = mongoose.model("Tracker", trackerSchema);
 
-// Utility functions (unchanged)
+// Utility functions
 const getClientIp = (req) => {
   return (
     req.headers["x-forwarded-for"] ||
@@ -150,7 +217,7 @@ const getClientIp = (req) => {
   );
 };
 
-// Socket.IO Connection Handling (unchanged)
+// Socket.IO Connection Handling
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
   socket.on("joinBus", (busNumber) => {
@@ -192,7 +259,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// API Routes (unchanged)
+// API Routes
 app.post("/api/register", async (req, res, next) => {
   try {
     const { userId, name, contact, email, password, confirmPassword, role } =
@@ -279,7 +346,7 @@ app.post("/api/login", async (req, res, next) => {
   }
 });
 
-// Protected routes middleware (unchanged)
+// Protected routes middleware
 const protect = async (req, res, next) => {
   try {
     let token;
@@ -310,7 +377,7 @@ const protect = async (req, res, next) => {
   }
 };
 
-// Protected route example (unchanged)
+// Protected route example
 app.get("/api/me", protect, async (req, res, next) => {
   try {
     res.status(200).json({
@@ -324,7 +391,7 @@ app.get("/api/me", protect, async (req, res, next) => {
   }
 });
 
-// Bus Management Endpoints (unchanged)
+// Bus Management Endpoints
 app.post("/api/buses", protect, async (req, res, next) => {
   try {
     const { busNumber, route, driverId, capacity, contactNumber } = req.body;
@@ -346,12 +413,25 @@ app.post("/api/buses", protect, async (req, res, next) => {
   }
 });
 
+// Get all buses
+app.get("/api/buses", protect, async (req, res, next) => {
+  try {
+    const buses = await Bus.find({});
+    res.status(200).json({
+      status: "success",
+      results: buses.length,
+      data: {
+        buses,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get("/api/buses/:busNumber", protect, async (req, res, next) => {
   try {
-    const bus = await Bus.findOne({ busNumber: req.params.busNumber }).populate(
-      "driverId",
-      "name contact"
-    );
+    const bus = await Bus.findOne({ busNumber: req.params.busNumber });
     if (!bus) {
       return res.status(404).json({
         status: "fail",
@@ -369,7 +449,7 @@ app.get("/api/buses/:busNumber", protect, async (req, res, next) => {
   }
 });
 
-// Location Tracking Endpoints (unchanged)
+// Location Tracking Endpoints
 app.post("/api/trackers", protect, async (req, res, next) => {
   try {
     const { busNumber, latitude, longitude, speed, direction } = req.body;
