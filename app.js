@@ -66,7 +66,7 @@ const signToken = (userId) => {
 // Manually handle CORS headers for all requests
 app.use((req, res, next) => {
   const allowedOrigins = [
-    "https://icb-tracking-system.netlify.app,
+    "https://icb-tracking-system.netlify.app",
     "http://localhost:3000",
   ];
 
